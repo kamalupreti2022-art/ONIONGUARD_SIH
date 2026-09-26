@@ -1,6 +1,6 @@
 {
   "name": "OnionGuard AI",
   "description": "AI-Assisted Onion Quality Assessment & Grading prototype for SIH 2026 Problem Statement SIH26031.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

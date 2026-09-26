@@ -15,11 +15,13 @@ import {
   X,
   Phone,
   ShieldCheck,
-  Plus
+  Plus,
+  RefreshCw
 } from 'lucide-react';
 import { BatchData, Language } from '../types';
 import { translations } from '../utils/translations';
 import { validateIndianPhoneNumber } from '../utils/whatsappService';
+import { preloadAllModels } from '../utils/tfModelService';
 
 interface ImageUploadProps {
   batch: BatchData;
@@ -52,16 +54,25 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Validate phone
   const phoneValidation = validateIndianPhoneNumber(farmerPhone);
   const isPhoneValid = phoneValidation.isValid;
+
+  // Preload models in the background to make analysis instant
+  useEffect(() => {
+    preloadAllModels();
+  }, []);
 
   // Stop camera tracks cleanly
   const stopCameraStream = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setIsCameraOpen(false);
     setCameraLoading(false);
@@ -72,6 +83,31 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
       stopCameraStream();
     };
   }, []);
+
+  // Sync stream to video element whenever video element or camera state mounts
+  const setVideoRef = (el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el && streamRef.current) {
+      if (el.srcObject !== streamRef.current) {
+        el.srcObject = streamRef.current;
+      }
+      el.play().catch((err) => {
+        console.warn('Video play error on ref attach:', err);
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (isCameraOpen && streamRef.current && videoRef.current) {
+      const video = videoRef.current;
+      if (video.srcObject !== streamRef.current) {
+        video.srcObject = streamRef.current;
+      }
+      video.play().catch((err) => {
+        console.warn('Video play error in effect:', err);
+      });
+    }
+  }, [isCameraOpen]);
 
   // Compress/resize uploaded or captured image using canvas for smooth memory handling
   const processImageFile = (file: File): Promise<string | null> => {
@@ -167,42 +203,66 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
     setSelectedImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  // Start device camera / webcam
+  // Start device camera / webcam with fallback constraints and native camera fallback
   const startCamera = async () => {
     setErrorMessage(null);
     setCameraLoading(true);
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setErrorMessage(t.cameraNotSupported || 'Camera not supported on this device.');
       setCameraLoading(false);
+      // Fallback directly to native camera input
+      cameraInputRef.current?.click();
       return;
     }
 
     try {
       stopCameraStream();
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-      };
+      let stream: MediaStream | null = null;
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
-      setIsCameraOpen(true);
-      setCameraLoading(false);
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch((err) => {
-          console.warn('Video play error:', err);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
         });
+      } catch (envErr) {
+        try {
+          // Fallback to any camera without resolution or facingMode restrictions
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        } catch (basicErr) {
+          stream = null;
+        }
+      }
+
+      if (stream) {
+        streamRef.current = stream;
+        setIsCameraOpen(true);
+        setCameraLoading(false);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch((err) => {
+            console.warn('Video play error on start:', err);
+          });
+        }
+      } else {
+        // If live stream was denied or unavailable, seamlessly open the device's native camera!
+        setCameraLoading(false);
+        stopCameraStream();
+        cameraInputRef.current?.click();
       }
     } catch (err: any) {
-      console.warn('Camera access error:', err);
+      console.warn('Camera access notice:', err);
+      setCameraLoading(false);
       stopCameraStream();
-      setErrorMessage(t.cameraPermissionDenied || 'Camera permission denied or camera unavailable.');
+      // Seamlessly trigger native camera
+      cameraInputRef.current?.click();
     }
   };
 
@@ -212,10 +272,15 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
 
     try {
       const video = videoRef.current;
-      const canvas = document.createElement('canvas');
       const width = video.videoWidth || 640;
       const height = video.videoHeight || 480;
 
+      if (width === 0 || height === 0) {
+        setErrorMessage('Camera feed is still starting. Please wait a moment.');
+        return;
+      }
+
+      const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
@@ -284,8 +349,18 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
         {errorMessage && (
           <div className="p-3.5 bg-[#fef2f2] border border-[#fca5a5] rounded-2xl text-[#b91c1c] text-xs font-semibold flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-[#ef4444]" />
-            <div className="flex-1">
+            <div className="flex-1 space-y-1.5">
               <span>{errorMessage}</span>
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 bg-[#1c5a35] hover:bg-[#174327] text-white px-3 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer shadow-xs active:scale-95"
+                >
+                  <Camera className="w-3.5 h-3.5 text-[#f2c14e]" />
+                  <span>Use Device Camera</span>
+                </button>
+              </div>
             </div>
             <button
               onClick={() => setErrorMessage(null)}
@@ -302,6 +377,17 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
           ref={fileInputRef}
           onChange={handleFileChange}
           accept="image/jpeg,image/png,image/webp,image/*"
+          multiple
+          className="hidden"
+        />
+
+        {/* Hidden Native Device Camera Input */}
+        <input
+          type="file"
+          ref={cameraInputRef}
+          onChange={handleFileChange}
+          accept="image/*"
+          capture="environment"
           multiple
           className="hidden"
         />
@@ -378,13 +464,23 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
             <div className={`relative aspect-square sm:aspect-video rounded-xl overflow-hidden bg-black flex items-center justify-center border border-[#174327] transition-opacity ${
               capturedFlash ? 'opacity-30' : 'opacity-100'
             }`}>
+              {cameraLoading && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white gap-2 z-20">
+                  <RefreshCw className="w-8 h-8 animate-spin text-[#f2c14e]" />
+                  <span className="text-xs font-bold font-heading">Initializing Camera...</span>
+                </div>
+              )}
+
               <video
-                ref={videoRef}
+                ref={setVideoRef}
                 autoPlay
                 playsInline
                 muted
                 className="w-full h-full object-cover"
                 onLoadedMetadata={(e) => {
+                  (e.target as HTMLVideoElement).play().catch(() => {});
+                }}
+                onCanPlay={(e) => {
                   (e.target as HTMLVideoElement).play().catch(() => {});
                 }}
               />

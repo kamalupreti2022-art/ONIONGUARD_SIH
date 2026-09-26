@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ViewMode, Language, BatchData, AssessmentRecord, ModelEngineType } from './types';
 import { 
   getStoredAssessments, 
@@ -21,6 +21,7 @@ import {
 } from './utils/storage';
 import { analyzeUploadedOnionImages, MultiScanResult } from './utils/imageScanner';
 import { generateFarmerReportText, sendWhatsAppReportToFarmer, validateIndianPhoneNumber } from './utils/whatsappService';
+import { preloadAllModels } from './utils/tfModelService';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { BottomNav } from './components/BottomNav';
@@ -58,9 +59,11 @@ export default function App() {
 
   const [activeImages, setActiveImages] = useState<string[]>([]);
   const [activeRecord, setActiveRecord] = useState<AssessmentRecord | null>(null);
+  const pendingScanPromiseRef = useRef<Promise<MultiScanResult> | null>(null);
 
-  // Initialize stored assessments
+  // Initialize stored assessments and preload models
   useEffect(() => {
+    preloadAllModels();
     const loaded = getStoredAssessments();
     setAssessments(loaded);
     if (loaded.length > 0 && !activeRecord) {
@@ -99,7 +102,10 @@ export default function App() {
     setPendingScanResult(null);
 
     // Genuinely analyze the uploaded image pixels using the trained AI models individually
-    analyzeUploadedOnionImages(images, modelEngine, customModelConnected)
+    const scanPromise = analyzeUploadedOnionImages(images, modelEngine, customModelConnected);
+    pendingScanPromiseRef.current = scanPromise;
+
+    scanPromise
       .then((result) => {
         setPendingScanResult(result);
       })
@@ -139,28 +145,28 @@ export default function App() {
   const handleAnalysisComplete = async () => {
     let scanResult = pendingScanResult;
 
-    if (!scanResult) {
+    if (!scanResult && pendingScanPromiseRef.current) {
       try {
-        scanResult = await analyzeUploadedOnionImages(
-          activeImages.length > 0 ? activeImages : [], 
-          modelEngine, 
-          customModelConnected
-        );
+        scanResult = await pendingScanPromiseRef.current;
       } catch (e: any) {
-        scanResult = {
-          totalAnalyzed: activeImages.length,
-          items: [],
-          counts: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: activeImages.length },
-          percentages: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: 100 },
-          detailedDetections: [],
-          gradeA: 0,
-          gradeURS: 0,
-          qualitySummary: e.message || 'Model loading error.',
-          modelAvailable: false,
-          modelEngine: 'tfjs_local',
-          modelNotice: e.message || 'Model loading error.'
-        };
+        scanResult = null;
       }
+    }
+
+    if (!scanResult) {
+      scanResult = {
+        totalAnalyzed: activeImages.length,
+        items: [],
+        counts: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: activeImages.length },
+        percentages: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: 100 },
+        detailedDetections: [],
+        gradeA: 0,
+        gradeURS: 0,
+        qualitySummary: 'Model loading error or timed out.',
+        modelAvailable: false,
+        modelEngine: 'tfjs_local',
+        modelNotice: 'Model loading error or timed out.'
+      };
     }
 
     // Generate clear Farmer Report text
@@ -327,6 +333,7 @@ export default function App() {
           {currentView === 'analyzing' && (
             <AnalysisLoading
               onComplete={handleAnalysisComplete}
+              isReady={Boolean(pendingScanResult)}
               language={language}
             />
           )}

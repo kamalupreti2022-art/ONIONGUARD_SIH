@@ -6,37 +6,44 @@ import { translations } from '../utils/translations';
 interface AnalysisLoadingProps {
   onComplete: () => void;
   language: Language;
+  isReady?: boolean;
 }
 
 export const AnalysisLoading: React.FC<AnalysisLoadingProps> = ({
   onComplete,
   language,
+  isReady = false,
 }) => {
   const t = translations[language] || translations.en;
-  const [progress, setProgress] = useState(25);
+  const [progress, setProgress] = useState(30);
   const onCompleteRef = React.useRef(onComplete);
   onCompleteRef.current = onComplete;
 
+  // If results are ready from the AI neural network, finish immediately!
   useEffect(() => {
-    const timer1 = setTimeout(() => {
-      setProgress(55);
-    }, 400);
-
-    const timer2 = setTimeout(() => {
-      setProgress(85);
-    }, 900);
-
-    const timer3 = setTimeout(() => {
+    if (isReady) {
       setProgress(100);
-      setTimeout(() => onCompleteRef.current(), 350);
-    }, 1400);
+      const doneTimer = setTimeout(() => {
+        onCompleteRef.current();
+      }, 140);
+      return () => clearTimeout(doneTimer);
+    }
+  }, [isReady]);
+
+  // Smooth visual progress while models execute
+  useEffect(() => {
+    if (isReady) return;
+
+    const t1 = setTimeout(() => setProgress(55), 120);
+    const t2 = setTimeout(() => setProgress(78), 260);
+    const t3 = setTimeout(() => setProgress(92), 480);
 
     return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-      clearTimeout(timer3);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
     };
-  }, []);
+  }, [isReady]);
 
   return (
     <div className="max-w-md mx-auto py-16 px-4 space-y-8">
@@ -65,7 +72,7 @@ export const AnalysisLoading: React.FC<AnalysisLoadingProps> = ({
         <div className="space-y-1.5 pt-2">
           <div className="w-full bg-[#0b2013] rounded-full h-3 overflow-hidden p-0.5 border border-[#24462f]">
             <div 
-              className="bg-gradient-to-r from-[#1c5a35] to-[#f2c14e] h-full rounded-full transition-all duration-300 ease-out"
+              className="bg-gradient-to-r from-[#1c5a35] to-[#f2c14e] h-full rounded-full transition-all duration-200 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>

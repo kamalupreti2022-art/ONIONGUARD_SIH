@@ -281,9 +281,13 @@ export async function checkAllModelsStatus(): Promise<MultiModelLoadStatus> {
   return status;
 }
 
+// Shared offscreen canvas for 224x224 scaling to avoid repeated DOM allocation
+let sharedScaledCanvas: HTMLCanvasElement | null = null;
+let sharedScaledCtx: CanvasRenderingContext2D | null = null;
+
 async function runInferenceOnImage(
   modelEntry: ModelCacheEntry, 
-  canvas: HTMLCanvasElement
+  source: CanvasImageSource
 ): Promise<number[]> {
   const model = modelEntry.model;
   let targetWidth = 224;
@@ -297,34 +301,104 @@ async function runInferenceOnImage(
     }
   }
 
-  const scaledCanvas = document.createElement('canvas');
-  scaledCanvas.width = targetWidth;
-  scaledCanvas.height = targetHeight;
-  const ctx = scaledCanvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas 2D context unavailable.');
-  ctx.drawImage(canvas, 0, 0, targetWidth, targetHeight);
+  if (!sharedScaledCanvas) {
+    sharedScaledCanvas = document.createElement('canvas');
+    sharedScaledCanvas.width = targetWidth;
+    sharedScaledCanvas.height = targetHeight;
+    sharedScaledCtx = sharedScaledCanvas.getContext('2d', { willReadFrequently: true });
+  } else if (sharedScaledCanvas.width !== targetWidth || sharedScaledCanvas.height !== targetHeight) {
+    sharedScaledCanvas.width = targetWidth;
+    sharedScaledCanvas.height = targetHeight;
+    sharedScaledCtx = sharedScaledCanvas.getContext('2d', { willReadFrequently: true });
+  }
+
+  if (!sharedScaledCtx) throw new Error('Canvas 2D context unavailable.');
+  sharedScaledCtx.drawImage(source, 0, 0, targetWidth, targetHeight);
 
   let rawProbs: number[] = [];
 
-  tf.tidy(() => {
-    const imgTensor = tf.browser.fromPixels(scaledCanvas);
+  const tensor = tf.tidy(() => {
+    const imgTensor = tf.browser.fromPixels(sharedScaledCanvas!);
     const normalized = imgTensor.toFloat().div(tf.scalar(127.5)).sub(tf.scalar(1.0));
     const batched = normalized.expandDims(0);
-
     const outputTensor = model.predict(batched) as tf.Tensor;
-    const squeezed = outputTensor.squeeze();
-    const data = Array.from(squeezed.dataSync());
-    const sum = data.reduce((a, b) => a + b, 0);
-
-    if (Math.abs(sum - 1.0) > 0.05) {
-      const softmaxed = tf.softmax(squeezed);
-      rawProbs = Array.from(softmaxed.dataSync());
-    } else {
-      rawProbs = data;
-    }
+    return outputTensor.squeeze();
   });
 
+  const data = await tensor.data();
+  tensor.dispose();
+
+  const dataArray = Array.from(data);
+  const sum = dataArray.reduce((a, b) => a + b, 0);
+
+  if (Math.abs(sum - 1.0) > 0.05) {
+    const softmaxTensor = tf.tidy(() => tf.softmax(tf.tensor1d(dataArray)));
+    const sData = await softmaxTensor.data();
+    softmaxTensor.dispose();
+    rawProbs = Array.from(sData);
+  } else {
+    rawProbs = dataArray;
+  }
+
   return rawProbs;
+}
+
+let preloadingPromise: Promise<void> | null = null;
+
+/**
+ * Preloads and warms up the TensorFlow.js models in the background.
+ * Eliminates initial cold-start delay when the user clicks Analyze.
+ */
+export function preloadAllModels(): Promise<void> {
+  if (preloadingPromise) return preloadingPromise;
+
+  preloadingPromise = (async () => {
+    try {
+      const mainPromise = loadMainModel();
+      const sproutedUrl = getConfiguredSproutedModelUrl();
+      const damagedUrl = getConfiguredDamagedModelUrl();
+
+      let secondaryPromise: Promise<any> | null = null;
+      if (sproutedUrl && sproutedUrl === damagedUrl) {
+        secondaryPromise = loadSingleModel(sproutedUrl, uploadedFilesMap.sprouted, ['sprouted', 'damaged']).then(m => {
+          cachedSprouted = m;
+          cachedDamaged = m;
+        });
+      } else {
+        if (sproutedUrl) {
+          loadSingleModel(sproutedUrl, uploadedFilesMap.sprouted, ['sprouted', 'healthy']).then(m => {
+            cachedSprouted = m;
+          }).catch(() => {});
+        }
+        if (damagedUrl) {
+          loadSingleModel(damagedUrl, uploadedFilesMap.damaged, ['damaged', 'healthy']).then(m => {
+            cachedDamaged = m;
+          }).catch(() => {});
+        }
+      }
+
+      const main = await mainPromise;
+      // Warm up WebGL shaders with zero tensor
+      tf.tidy(() => {
+        const dummy = tf.zeros([1, 224, 224, 3]);
+        main.model.predict(dummy);
+      });
+
+      if (secondaryPromise) {
+        await secondaryPromise;
+        if (cachedSprouted) {
+          tf.tidy(() => {
+            const dummy = tf.zeros([1, 224, 224, 3]);
+            cachedSprouted!.model.predict(dummy);
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Model preloading notice:', e);
+    }
+  })();
+
+  return preloadingPromise;
 }
 
 /**
@@ -339,7 +413,7 @@ export async function predictSingleOnionPhoto(
 ): Promise<SingleImageInferenceResult> {
   const startTime = performance.now();
 
-  // 1. Load Main Model
+  // 1. Load Main Model (cached / preloaded)
   const main = await loadMainModel();
 
   // 2. Load image element
@@ -356,15 +430,8 @@ export async function predictSingleOnionPhoto(
     imgElement = imageSource;
   }
 
-  const baseCanvas = document.createElement('canvas');
-  baseCanvas.width = imgElement.naturalWidth || imgElement.width || 400;
-  baseCanvas.height = imgElement.naturalHeight || imgElement.height || 400;
-  const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
-  if (!baseCtx) throw new Error('Canvas 2D context unavailable.');
-  baseCtx.drawImage(imgElement, 0, 0);
-
-  // 3. Run Main Model (8 Classes)
-  const mainProbs = await runInferenceOnImage(main, baseCanvas);
+  // 3. Run Main Model (8 Classes) directly from image element
+  const mainProbs = await runInferenceOnImage(main, imgElement);
   const mainClassMap = new Map<string, number>();
 
   main.labels.forEach((label, idx) => {
@@ -389,67 +456,92 @@ export async function predictSingleOnionPhoto(
   }
 
   // 4. Sprouted & Damaged Detection:
-  // If custom models configured, use them. Otherwise, evaluate directly from the photo's pixel characteristics!
+  // If custom models configured, use them. If they share the same URL, run inference only once!
   let sproutedProb = 0;
   let damagedProb = 0;
 
   const sproutedUrl = getConfiguredSproutedModelUrl();
   const damagedUrl = getConfiguredDamagedModelUrl();
 
-  if (sproutedUrl) {
+  if (sproutedUrl && damagedUrl && sproutedUrl === damagedUrl) {
+    // Both sprouted and damaged are evaluated from the unified 2-class model
     try {
       if (!cachedSprouted || cachedSprouted.url !== sproutedUrl) {
-        cachedSprouted = await loadSingleModel(sproutedUrl, uploadedFilesMap.sprouted, ['sprouted', 'healthy']);
+        cachedSprouted = await loadSingleModel(sproutedUrl, uploadedFilesMap.sprouted, ['sprouted', 'damaged']);
+        cachedDamaged = cachedSprouted;
       }
-      const p = await runInferenceOnImage(cachedSprouted, baseCanvas);
+      const p = await runInferenceOnImage(cachedSprouted, imgElement);
       const sIdx = cachedSprouted.labels.findIndex(l => l.toLowerCase().includes('sprout'));
+      const dIdx = cachedSprouted.labels.findIndex(l => l.toLowerCase().includes('damage'));
       sproutedProb = sIdx >= 0 ? p[sIdx] : p[0];
+      damagedProb = dIdx >= 0 ? p[dIdx] : (p.length > 1 ? p[1] : 0);
     } catch (e) {
-      console.warn('Sprouted model URL execution notice:', e);
+      console.warn('Sprouted/Damaged model execution notice:', e);
     }
-  }
-
-  if (damagedUrl) {
-    try {
-      if (!cachedDamaged || cachedDamaged.url !== damagedUrl) {
-        cachedDamaged = await loadSingleModel(damagedUrl, uploadedFilesMap.damaged, ['damaged', 'healthy']);
+  } else {
+    // Separate models
+    if (sproutedUrl) {
+      try {
+        if (!cachedSprouted || cachedSprouted.url !== sproutedUrl) {
+          cachedSprouted = await loadSingleModel(sproutedUrl, uploadedFilesMap.sprouted, ['sprouted', 'healthy']);
+        }
+        const p = await runInferenceOnImage(cachedSprouted, imgElement);
+        const sIdx = cachedSprouted.labels.findIndex(l => l.toLowerCase().includes('sprout'));
+        sproutedProb = sIdx >= 0 ? p[sIdx] : p[0];
+      } catch (e) {
+        console.warn('Sprouted model URL execution notice:', e);
       }
-      const p = await runInferenceOnImage(cachedDamaged, baseCanvas);
-      const dIdx = cachedDamaged.labels.findIndex(l => l.toLowerCase().includes('damage'));
-      damagedProb = dIdx >= 0 ? p[dIdx] : (p.length > 1 ? p[1] : p[0]);
-    } catch (e) {
-      console.warn('Damaged model URL execution notice:', e);
+    }
+
+    if (damagedUrl) {
+      try {
+        if (!cachedDamaged || cachedDamaged.url !== damagedUrl) {
+          cachedDamaged = await loadSingleModel(damagedUrl, uploadedFilesMap.damaged, ['damaged', 'healthy']);
+        }
+        const p = await runInferenceOnImage(cachedDamaged, imgElement);
+        const dIdx = cachedDamaged.labels.findIndex(l => l.toLowerCase().includes('damage'));
+        damagedProb = dIdx >= 0 ? p[dIdx] : (p.length > 1 ? p[1] : p[0]);
+      } catch (e) {
+        console.warn('Damaged model URL execution notice:', e);
+      }
     }
   }
 
-  // If no external model URL provided, compute from the image's physical onion features
+  // Fallback heuristic if models were unconfigured
   if (!sproutedUrl || !damagedUrl) {
-    const imgData = baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height);
-    const data = imgData.data;
-    let onionPix = 0;
-    let greenPix = 0;
-    let cutPix = 0;
+    const baseCanvas = document.createElement('canvas');
+    baseCanvas.width = 160;
+    baseCanvas.height = 160;
+    const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
+    if (baseCtx) {
+      baseCtx.drawImage(imgElement, 0, 0, 160, 160);
+      const imgData = baseCtx.getImageData(0, 0, 160, 160);
+      const data = imgData.data;
+      let onionPix = 0;
+      let greenPix = 0;
+      let cutPix = 0;
 
-    for (let i = 0; i < data.length; i += 8) {
-      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-      if (a < 20) continue;
-      const [h, s, v] = rgbToHsv(r, g, b);
-      const isOnion = (h < 40 || h > 315 || (h >= 20 && h <= 55)) && s > 0.14 && v > 0.14;
-      if (isOnion) {
-        onionPix++;
-        if (h >= 65 && h <= 160 && s > 0.22 && v > 0.18) greenPix++;
-        if (h >= 42 && h <= 64 && s > 0.38 && v > 0.38) cutPix++;
+      for (let i = 0; i < data.length; i += 8) {
+        const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        if (a < 20) continue;
+        const [h, s, v] = rgbToHsv(r, g, b);
+        const isOnion = (h < 40 || h > 315 || (h >= 20 && h <= 55)) && s > 0.14 && v > 0.14;
+        if (isOnion) {
+          onionPix++;
+          if (h >= 65 && h <= 160 && s > 0.22 && v > 0.18) greenPix++;
+          if (h >= 42 && h <= 64 && s > 0.38 && v > 0.38) cutPix++;
+        }
       }
-    }
 
-    if (onionPix > 0) {
-      const greenRatio = greenPix / onionPix;
-      const cutRatio = cutPix / onionPix;
-      if (!sproutedUrl) {
-        sproutedProb = Math.min(0.98, greenRatio * 15);
-      }
-      if (!damagedUrl) {
-        damagedProb = Math.min(0.95, cutRatio * 12);
+      if (onionPix > 0) {
+        const greenRatio = greenPix / onionPix;
+        const cutRatio = cutPix / onionPix;
+        if (!sproutedUrl) {
+          sproutedProb = Math.min(0.98, greenRatio * 15);
+        }
+        if (!damagedUrl) {
+          damagedProb = Math.min(0.95, cutRatio * 12);
+        }
       }
     }
   }
