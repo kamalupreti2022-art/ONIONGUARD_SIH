@@ -1,17 +1,23 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import React from 'react';
 import { 
   Printer, 
   Download, 
   ArrowLeft, 
   CheckCircle, 
-  Award, 
+  Check, 
+  Flame, 
+  AlertTriangle,
   Sparkles,
-  Info,
-  Check,
-  XCircle
+  Phone
 } from 'lucide-react';
 import { AssessmentRecord, Language } from '../types';
 import { translations } from '../utils/translations';
+import { maskPhoneNumber } from '../utils/whatsappService';
 
 interface DigitalReportProps {
   record: AssessmentRecord;
@@ -30,8 +36,9 @@ export const DigitalReport: React.FC<DigitalReportProps> = ({
     window.print();
   };
 
-  const healthyPercentage = record.percentages.healthy ?? 0;
-  const unhealthyPercentage = record.percentages.unhealthy ?? (100 - healthyPercentage);
+  const healthyPercentage = record.percentages.healthy;
+  const rottenPercentage = record.percentages.rotten;
+  const sproutedPercentage = record.percentages.sprouted;
 
   const handleDownload = () => {
     const reportData = {
@@ -40,14 +47,20 @@ export const DigitalReport: React.FC<DigitalReportProps> = ({
       batchId: record.batch.batchId,
       procurementCentre: record.batch.procurementCentre,
       inspector: record.batch.inspectorName,
+      farmerPhone: record.batch.farmerPhone ? maskPhoneNumber(record.batch.farmerPhone) : undefined,
       dateTime: record.timestamp,
       onionVariety: record.batch.onionVariety,
       approxQuantity: record.batch.approxQuantity,
+      photosAnalyzed: record.totalAnalyzed,
       classificationResult: {
         healthyPercentage: `${healthyPercentage}%`,
-        unhealthyPercentage: `${unhealthyPercentage}%`,
+        rottenPercentage: `${rottenPercentage}%`,
+        sproutedPercentage: `${sproutedPercentage}%`,
       },
+      detailedDetections: record.detailedDetections || [],
       assessmentSummary: record.qualitySummary,
+      farmerWhatsAppReport: record.farmerWhatsAppReport,
+      whatsappDelivery: record.whatsappDelivery,
       generatedAt: new Date().toISOString(),
     };
 
@@ -107,7 +120,7 @@ export const DigitalReport: React.FC<DigitalReportProps> = ({
                   {t.reportTitle}
                 </h1>
                 <p className="text-xs text-[#1c5a35] font-bold">
-                  OnionGuard AI Automated Quality Assurance Report
+                  OnionGuard AI Automated Multi-Model Quality Assurance Report
                 </p>
               </div>
             </div>
@@ -144,7 +157,7 @@ export const DigitalReport: React.FC<DigitalReportProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 text-xs border-t border-[#f1f6f0]">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 text-xs border-t border-[#f1f6f0]">
             <div>
               <span className="text-[#55665b] font-semibold uppercase text-[10px] block">{t.procurementCentreLabel}</span>
               <span className="font-bold text-[#1c2a20]">{record.batch.procurementCentre}</span>
@@ -153,10 +166,16 @@ export const DigitalReport: React.FC<DigitalReportProps> = ({
               <span className="text-[#55665b] font-semibold uppercase text-[10px] block">{t.inspectorName}</span>
               <span className="font-bold text-[#1c2a20]">{record.batch.inspectorName}</span>
             </div>
+            <div>
+              <span className="text-[#55665b] font-semibold uppercase text-[10px] block">Farmer WhatsApp</span>
+              <span className="font-bold font-mono text-[#1c2a20]">
+                {record.batch.farmerPhone ? maskPhoneNumber(record.batch.farmerPhone) : 'Not recorded'}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* SECTION 1: CLASSIFICATION RESULT (ONLY HEALTHY & UNHEALTHY) */}
+        {/* SECTION 1: MAIN CLASSIFICATION RESULT (HEALTHY, ROTTEN, SPROUTED) */}
         <div className="space-y-4">
           <div className="flex items-center justify-between border-b border-[#e4e1d3] pb-2">
             <h2 className="text-sm font-black text-[#174327] uppercase tracking-wider font-heading flex items-center gap-2">
@@ -164,61 +183,83 @@ export const DigitalReport: React.FC<DigitalReportProps> = ({
               <span>AI QUALITY CLASSIFICATION RESULT</span>
             </h2>
             <span className="text-xs font-bold text-[#55665b]">
-              {t.totalOnionsAnalyzed}: <span className="font-mono font-black text-[#1c2a20]">{record.totalAnalyzed}</span>
+              Photos Analyzed: <span className="font-mono font-black text-[#1c2a20]">{record.totalAnalyzed}</span>
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="p-5 rounded-2xl border-2 border-[#bcd6c0] bg-[#e0eee2]/50 flex items-center justify-between">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* HEALTHY */}
+            <div className="p-4 rounded-2xl border-2 border-[#bcd6c0] bg-[#e0eee2]/50 flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-[#1c5a35] uppercase tracking-wider">HEALTHY</span>
-                <div className="text-3xl font-black text-[#174327] font-heading mt-0.5">{healthyPercentage}%</div>
-                <p className="text-[11px] text-[#1c5a35] mt-1">Sum of 4 healthy model classes</p>
+                <div className="text-2xl sm:text-3xl font-black text-[#174327] font-heading mt-0.5">{healthyPercentage}%</div>
+                <p className="text-[10px] text-[#1c5a35] mt-0.5">Sum of 4 healthy classes</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-[#1c5a35] text-white flex items-center justify-center font-bold">
-                <Check className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-xl bg-[#1c5a35] text-white flex items-center justify-center font-bold">
+                <Check className="w-5 h-5" />
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl border-2 border-[#e5c1ba] bg-[#f6e5e1]/50 flex items-center justify-between">
+            {/* ROTTEN */}
+            <div className="p-4 rounded-2xl border-2 border-[#e5c1ba] bg-[#f6e5e1]/50 flex items-center justify-between">
               <div>
-                <span className="text-xs font-bold text-[#a93b2e] uppercase tracking-wider">UNHEALTHY</span>
-                <div className="text-3xl font-black text-[#a93b2e] font-heading mt-0.5">{unhealthyPercentage}%</div>
-                <p className="text-[11px] text-[#a93b2e] mt-1">Sum of 4 rotten model classes</p>
+                <span className="text-xs font-bold text-[#a93b2e] uppercase tracking-wider">ROTTEN</span>
+                <div className="text-2xl sm:text-3xl font-black text-[#a93b2e] font-heading mt-0.5">{rottenPercentage}%</div>
+                <p className="text-[10px] text-[#a93b2e] mt-0.5">Sum of 4 rotten classes</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-[#a93b2e] text-white flex items-center justify-center font-bold">
-                <XCircle className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-xl bg-[#a93b2e] text-white flex items-center justify-center font-bold">
+                <Flame className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* SPROUTED */}
+            <div className="p-4 rounded-2xl border-2 border-[#fef08a] bg-[#fefce8] flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-[#854d0e] uppercase tracking-wider">SPROUTED</span>
+                <div className="text-2xl sm:text-3xl font-black text-[#854d0e] font-heading mt-0.5">{sproutedPercentage}%</div>
+                <p className="text-[10px] text-[#854d0e] mt-0.5">Sprouted neural network</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-[#ca8a04] text-white flex items-center justify-center font-bold">
+                <AlertTriangle className="w-5 h-5" />
               </div>
             </div>
           </div>
 
-          {/* 8 Detailed Classes Breakdown Table */}
-          {record.imageItems && record.imageItems.length > 0 && record.imageItems[0].class8Probabilities && (
+          {/* 10 Detailed Detections Breakdown Table */}
+          {record.detailedDetections && record.detailedDetections.length > 0 && (
             <div className="pt-2">
               <h3 className="text-xs font-bold text-[#174327] uppercase tracking-wider font-heading mb-2">
-                Detailed 8 Class Breakdown
+                Detailed 10-Class Neural Network Detections
               </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="bg-[#f7f5ee] text-[#55665b] font-bold uppercase tracking-wider text-[10px] border-b border-[#cfcbb8]">
                       <th className="py-2 px-3">Class</th>
+                      <th className="py-2 px-3">Model</th>
                       <th className="py-2 px-3">Category</th>
-                      <th className="py-2 px-3 text-right">Probability %</th>
+                      <th className="py-2 px-3 text-right">Confidence %</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#f1f6f0]">
-                    {record.imageItems[0].class8Probabilities.map((cls) => (
-                      <tr key={cls.className}>
-                        <td className="py-2 px-3 font-medium text-[#1c2a20]">{cls.displayName}</td>
+                    {record.detailedDetections.map((det) => (
+                      <tr key={det.key}>
+                        <td className="py-2 px-3 font-medium text-[#1c2a20]">{det.displayName}</td>
+                        <td className="py-2 px-3 capitalize text-[#55665b]">{det.sourceModel}</td>
                         <td className="py-2 px-3">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            cls.isHealthyGroup ? 'bg-[#e0eee2] text-[#1c5a35]' : 'bg-[#f6e5e1] text-[#a93b2e]'
+                            det.category === 'HEALTHY' 
+                              ? 'bg-[#e0eee2] text-[#1c5a35]' 
+                              : det.category === 'SPROUTED'
+                              ? 'bg-[#fefce8] text-[#854d0e]'
+                              : det.category === 'DAMAGED'
+                              ? 'bg-[#fff7ed] text-[#c2410c]'
+                              : 'bg-[#f6e5e1] text-[#a93b2e]'
                           }`}>
-                            {cls.isHealthyGroup ? 'HEALTHY' : 'UNHEALTHY'}
+                            {det.category}
                           </span>
                         </td>
-                        <td className="py-2 px-3 text-right font-mono font-bold">{cls.percentage}%</td>
+                        <td className="py-2 px-3 text-right font-mono font-bold">{det.percentage}%</td>
                       </tr>
                     ))}
                   </tbody>

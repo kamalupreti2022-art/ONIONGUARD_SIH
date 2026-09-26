@@ -155,7 +155,7 @@ export const HistoryPage: React.FC<HistoryPageProps> = ({
             <table className="w-full text-left text-xs">
               <thead>
                 <tr className="bg-[#f7f5ee] text-[#55665b] font-bold uppercase tracking-wider text-[10px] border-b-2 border-[#cfcbb8]">
-                  <th className="py-3 px-4">{t.reportId} / {t.batchId}</th>
+                  <th className="py-3 px-4">{t.reportIdLabel} / {t.batchId}</th>
                   <th className="py-3 px-4">{t.inspectionDate}</th>
                   <th className="py-3 px-4">{t.procurementCentreLabel}</th>
                   <th className="py-3 px-4">{t.onionVariety}</th>

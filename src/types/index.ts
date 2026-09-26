@@ -5,7 +5,7 @@
 
 export type OnionDefectType = 'healthy' | 'damaged' | 'rotten' | 'sprouted' | 'other' | 'undersized' | 'unable_to_determine';
 
-export type MainQualityCategory = 'HEALTHY' | 'UNHEALTHY' | 'unable_to_determine';
+export type MainQualityCategory = 'HEALTHY' | 'ROTTEN' | 'SPROUTED' | 'unable_to_determine';
 
 export const MODEL_8_CLASSES = [
   'red healthy onions(single)',
@@ -19,6 +19,16 @@ export const MODEL_8_CLASSES = [
 ] as const;
 
 export type OnionModel8Class = typeof MODEL_8_CLASSES[number];
+
+export interface DetailedDetectionItem {
+  key: string;
+  className: string;
+  displayName: string;
+  probability: number;
+  percentage: number;
+  category: 'HEALTHY' | 'ROTTEN' | 'SPROUTED' | 'DAMAGED';
+  sourceModel: 'main' | 'sprouted' | 'damaged';
+}
 
 export interface ClassProbabilityItem {
   className: string;
@@ -37,23 +47,21 @@ export interface Class8ProbabilityItem {
 
 export interface DefectCounts {
   healthy: number;
-  unhealthy?: number;
-  damaged: number;
   rotten: number;
   sprouted: number;
+  damaged: number;
   other?: number;
-  undersized: number;
+  undersized?: number;
   unableToDetermine: number;
 }
 
 export interface DefectPercentages {
   healthy: number;
-  unhealthy?: number;
-  damaged: number;
   rotten: number;
   sprouted: number;
+  damaged: number;
   other?: number;
-  undersized: number;
+  undersized?: number;
   unableToDetermine?: number;
 }
 
@@ -62,17 +70,20 @@ export interface ImageAnalysisItem {
   imageIndex: number;
   imageSrc: string;
   prediction: OnionDefectType;
-  mainCategory?: MainQualityCategory;
-  label: string; // 'HEALTHY' | 'UNHEALTHY' | 'Unable to determine'
-  healthyPercentage?: number;
-  unhealthyPercentage?: number;
-  confidence?: number; // main model confidence percentage
+  mainCategory: MainQualityCategory;
+  label: string; // 'HEALTHY' | 'ROTTEN' | 'SPROUTED' | 'Unable to determine'
+  healthyPercentage: number;
+  rottenPercentage: number;
+  sproutedPercentage: number;
+  damagedPercentage: number;
+  confidence?: number; // winning category confidence percentage
   qualityInterpretation?: string;
   recommendation?: string;
   allProbabilities?: ClassProbabilityItem[];
   class8Probabilities?: Class8ProbabilityItem[];
   healthyClassDetails?: Class8ProbabilityItem[];
   unhealthyClassDetails?: Class8ProbabilityItem[];
+  detailedDetections?: DetailedDetectionItem[];
   highestClass?: {
     className: string;
     displayName: string;
@@ -124,6 +135,15 @@ export interface BatchData {
   onionVariety: string;
   approxQuantity: string;
   notes?: string;
+  farmerPhone?: string;
+  farmerName?: string;
+}
+
+export interface WhatsAppDeliveryStatus {
+  status: 'sent' | 'failed' | 'not_configured' | 'pending';
+  message: string;
+  timestamp?: string;
+  maskedPhone?: string;
 }
 
 export interface AssessmentRecord {
@@ -133,10 +153,9 @@ export interface AssessmentRecord {
   images: string[];
   imageItems?: ImageAnalysisItem[];
   totalAnalyzed: number;
-  healthyCount?: number;
-  unhealthyCount?: number;
   counts: DefectCounts;
   percentages: DefectPercentages;
+  detailedDetections?: DetailedDetectionItem[];
   gradeA: number; // percentage
   gradeURS: number; // Under-size, Rotten, Sprouted percentage
   qualitySummary: string;
@@ -147,6 +166,8 @@ export interface AssessmentRecord {
   modelAvailable?: boolean;
   modelNotice?: string;
   boundingBoxes?: BoundingBox[];
+  farmerWhatsAppReport?: string;
+  whatsappDelivery?: WhatsAppDeliveryStatus;
 }
 
 export type ViewMode = 

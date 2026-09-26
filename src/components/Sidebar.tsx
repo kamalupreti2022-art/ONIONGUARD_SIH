@@ -130,7 +130,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>AI Onion Quality Standards</span>
           </div>
           <p className="text-[11px] text-[#55665b] leading-tight">
-            Objective 8-class neural network classifies sound HEALTHY vs rotten UNHEALTHY produce.
+            3-model AI suite evaluates HEALTHY, ROTTEN, and SPROUTED produce across 10 detailed detections.
           </p>
         </div>
       </aside>

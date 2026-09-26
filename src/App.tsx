@@ -20,6 +20,7 @@ import {
   saveStoredCustomModelConnected
 } from './utils/storage';
 import { analyzeUploadedOnionImages, MultiScanResult } from './utils/imageScanner';
+import { generateFarmerReportText, sendWhatsAppReportToFarmer, validateIndianPhoneNumber } from './utils/whatsappService';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { BottomNav } from './components/BottomNav';
@@ -89,12 +90,15 @@ export default function App() {
   };
 
   // Image Upload -> Start Real Trained AI Model Analysis
-  const handleStartAnalysis = (images: string[]) => {
+  const handleStartAnalysis = (images: string[], farmerPhone?: string) => {
     setActiveImages(images);
+    if (farmerPhone) {
+      setActiveBatch((prev) => ({ ...prev, farmerPhone }));
+    }
     setCurrentView('analyzing');
     setPendingScanResult(null);
 
-    // Genuinely analyze the uploaded image pixels using the trained AI model
+    // Genuinely analyze the uploaded image pixels using the trained AI models individually
     analyzeUploadedOnionImages(images, modelEngine, customModelConnected)
       .then((result) => {
         setPendingScanResult(result);
@@ -111,84 +115,132 @@ export default function App() {
             mainCategory: 'unable_to_determine',
             label: 'Unable to determine',
             healthyPercentage: 0,
-            unhealthyPercentage: 0,
-            reason: 'Unable to perform reliable AI quality assessment because the trained onion model is not currently connected.',
+            rottenPercentage: 0,
+            sproutedPercentage: 0,
+            damagedPercentage: 0,
+            reason: 'Unable to perform reliable AI quality assessment because the trained onion models could not be loaded.',
             sizeReferenceDetected: false,
             bulbDetected: false
           })),
-          counts: { healthy: 0, unhealthy: 0, damaged: 0, rotten: 0, sprouted: 0, other: 0, undersized: 0, unableToDetermine: images.length },
-          percentages: { healthy: 0, unhealthy: 0, damaged: 0, rotten: 0, sprouted: 0, other: 0, undersized: 0, unableToDetermine: 100 },
+          counts: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: images.length },
+          percentages: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: 100 },
+          detailedDetections: [],
           gradeA: 0,
           gradeURS: 0,
-          qualitySummary: 'AI model is not available. Please add the trained model files.',
-          boundingBoxes: [],
+          qualitySummary: 'AI model is not available. Please check model URLs or add the trained model files.',
           modelAvailable: false,
           modelEngine: 'tfjs_local',
-          modelNotice: 'AI model is not available. Please add the trained model files.'
+          modelNotice: 'AI model is not available. Please check model URLs or add the trained model files.'
         });
       });
   };
 
   // When AI Loading completes
-  const handleAnalysisComplete = () => {
-    if (pendingScanResult) {
-      const newRecord: AssessmentRecord = {
-        reportId: `REP-${activeBatch.batchId}-${Date.now().toString().slice(-4)}`,
-        batch: activeBatch,
-        timestamp: new Date().toISOString(),
-        images: activeImages.length > 0 ? activeImages : [],
-        imageItems: pendingScanResult.items,
-        totalAnalyzed: pendingScanResult.totalAnalyzed,
-        counts: pendingScanResult.counts,
-        percentages: pendingScanResult.percentages,
-        gradeA: pendingScanResult.gradeA,
-        gradeURS: pendingScanResult.gradeURS,
-        qualitySummary: pendingScanResult.qualitySummary,
-        boundingBoxes: pendingScanResult.boundingBoxes,
-        status: 'Completed',
-        isDemoData: false,
-        isRealScan: pendingScanResult.modelAvailable,
-        modelEngineUsed: pendingScanResult.modelEngine,
-        modelAvailable: pendingScanResult.modelAvailable,
-        modelNotice: pendingScanResult.modelNotice,
-      };
+  const handleAnalysisComplete = async () => {
+    let scanResult = pendingScanResult;
 
-      saveAssessment(newRecord);
-      setAssessments(getStoredAssessments());
-      setActiveRecord(newRecord);
-      setCurrentView('analysis-results');
-      return;
+    if (!scanResult) {
+      try {
+        scanResult = await analyzeUploadedOnionImages(
+          activeImages.length > 0 ? activeImages : [], 
+          modelEngine, 
+          customModelConnected
+        );
+      } catch (e: any) {
+        scanResult = {
+          totalAnalyzed: activeImages.length,
+          items: [],
+          counts: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: activeImages.length },
+          percentages: { healthy: 0, rotten: 0, sprouted: 0, damaged: 0, unableToDetermine: 100 },
+          detailedDetections: [],
+          gradeA: 0,
+          gradeURS: 0,
+          qualitySummary: e.message || 'Model loading error.',
+          modelAvailable: false,
+          modelEngine: 'tfjs_local',
+          modelNotice: e.message || 'Model loading error.'
+        };
+      }
     }
 
-    // Fallback if still resolving
-    analyzeUploadedOnionImages(activeImages.length > 0 ? activeImages : [], modelEngine, customModelConnected)
-      .then((realResult) => {
-        const newRecord: AssessmentRecord = {
-          reportId: `REP-${activeBatch.batchId}-${Date.now().toString().slice(-4)}`,
-          batch: activeBatch,
-          timestamp: new Date().toISOString(),
-          images: activeImages.length > 0 ? activeImages : [],
-          imageItems: realResult.items,
-          totalAnalyzed: realResult.totalAnalyzed,
-          counts: realResult.counts,
-          percentages: realResult.percentages,
-          gradeA: realResult.gradeA,
-          gradeURS: realResult.gradeURS,
-          qualitySummary: realResult.qualitySummary,
-          boundingBoxes: realResult.boundingBoxes,
-          status: 'Completed',
-          isDemoData: false,
-          isRealScan: realResult.modelAvailable,
-          modelEngineUsed: realResult.modelEngine,
-          modelAvailable: realResult.modelAvailable,
-          modelNotice: realResult.modelNotice,
-        };
+    // Generate clear Farmer Report text
+    const farmerReport = generateFarmerReportText({
+      dateTime: new Date().toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: 'Asia/Kolkata',
+      }),
+      totalPhotos: scanResult.totalAnalyzed,
+      overall: {
+        healthy: scanResult.percentages.healthy,
+        rotten: scanResult.percentages.rotten,
+        sprouted: scanResult.percentages.sprouted,
+      },
+      detailedDetections: scanResult.detailedDetections,
+      batchId: activeBatch.batchId,
+    });
 
+    const newRecord: AssessmentRecord = {
+      reportId: `REP-${activeBatch.batchId}-${Date.now().toString().slice(-4)}`,
+      batch: activeBatch,
+      timestamp: new Date().toISOString(),
+      images: activeImages.length > 0 ? activeImages : [],
+      imageItems: scanResult.items,
+      totalAnalyzed: scanResult.totalAnalyzed,
+      counts: scanResult.counts,
+      percentages: scanResult.percentages,
+      detailedDetections: scanResult.detailedDetections,
+      gradeA: scanResult.gradeA,
+      gradeURS: scanResult.gradeURS,
+      qualitySummary: scanResult.qualitySummary,
+      status: 'Completed',
+      isDemoData: false,
+      isRealScan: scanResult.modelAvailable,
+      modelEngineUsed: scanResult.modelEngine,
+      modelAvailable: scanResult.modelAvailable,
+      modelNotice: scanResult.modelNotice,
+      farmerWhatsAppReport: farmerReport,
+      whatsappDelivery: activeBatch.farmerPhone ? {
+        status: 'pending',
+        message: 'Dispatching WhatsApp report to farmer...',
+        maskedPhone: activeBatch.farmerPhone,
+      } : undefined,
+    };
+
+    saveAssessment(newRecord);
+    setAssessments(getStoredAssessments());
+    setActiveRecord(newRecord);
+    setCurrentView('analysis-results');
+
+    // Automatically send WhatsApp message to farmer's WhatsApp number via secure backend
+    if (activeBatch.farmerPhone && scanResult.modelAvailable) {
+      try {
+        const deliveryResult = await sendWhatsAppReportToFarmer(activeBatch.farmerPhone, farmerReport);
+        newRecord.whatsappDelivery = {
+          status: deliveryResult.success 
+            ? 'sent' 
+            : deliveryResult.notConfigured 
+            ? 'not_configured' 
+            : 'failed',
+          message: deliveryResult.message,
+          timestamp: deliveryResult.timestamp,
+          maskedPhone: activeBatch.farmerPhone,
+        };
         saveAssessment(newRecord);
         setAssessments(getStoredAssessments());
-        setActiveRecord(newRecord);
-        setCurrentView('analysis-results');
-      });
+        setActiveRecord({ ...newRecord });
+      } catch (sendErr: any) {
+        newRecord.whatsappDelivery = {
+          status: 'failed',
+          message: sendErr.message || 'WhatsApp report could not be sent.',
+          timestamp: new Date().toISOString(),
+          maskedPhone: activeBatch.farmerPhone,
+        };
+        saveAssessment(newRecord);
+        setAssessments(getStoredAssessments());
+        setActiveRecord({ ...newRecord });
+      }
+    }
   };
 
   const handleSelectAssessment = (record: AssessmentRecord) => {

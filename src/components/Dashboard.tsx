@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AssessmentRecord, Language, ViewMode } from '../types';
 import { translations } from '../utils/translations';
+import { LivePriceIndicator } from './LivePriceIndicator';
 
 interface DashboardProps {
   assessments: AssessmentRecord[];
@@ -39,28 +40,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Banner / Actions Bar */}
-      <div className="bg-[#122e1d] text-[#f4f1e4] p-6 sm:p-7 rounded-3xl border-2 border-[#0a1f12] shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight font-heading">
-              {t.dashboard}
-            </h1>
+      {/* Top Banner / Actions Bar with Live Price Indicator */}
+      <div className="bg-[#122e1d] text-[#f4f1e4] p-6 sm:p-7 rounded-3xl border-2 border-[#0a1f12] shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight font-heading">
+                {t.dashboard}
+              </h1>
+            </div>
+            <p className="text-xs sm:text-sm text-[#a9bfa9]">
+              AI-Assisted Onion Quality Assessment & Grading Dashboard
+            </p>
           </div>
-          <p className="text-xs sm:text-sm text-[#a9bfa9]">
-            AI-Assisted Onion Quality Assessment & Grading Dashboard
-          </p>
+
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => onNavigate('create-batch')}
+              className="inline-flex items-center gap-1.5 bg-[#1c5a35] hover:bg-[#237342] text-white font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm transition-all shadow-md cursor-pointer active:scale-95"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>{t.newBatchCTA}</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => onNavigate('create-batch')}
-            className="inline-flex items-center gap-1.5 bg-[#1c5a35] hover:bg-[#237342] text-white font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm transition-all shadow-md cursor-pointer active:scale-95"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>{t.newBatchCTA}</span>
-          </button>
-        </div>
+        {/* Live MSP / Mandi Benchmark Price Indicator inside main dark-green section */}
+        <LivePriceIndicator />
       </div>
 
       {/* KPI Stats Cards */}

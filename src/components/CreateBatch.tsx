@@ -52,6 +52,7 @@ export const CreateBatch: React.FC<CreateBatchProps> = ({
   const [date, setDate] = useState(initialBatch?.date || today);
   const [onionVariety, setOnionVariety] = useState(initialBatch?.onionVariety || SAMPLE_VARIETIES[0]);
   const [approxQuantity, setApproxQuantity] = useState(initialBatch?.approxQuantity || '50 Quintals (500 Bags)');
+  const [farmerPhone, setFarmerPhone] = useState(initialBatch?.farmerPhone || '');
   const [notes, setNotes] = useState(initialBatch?.notes || '');
   const [error, setError] = useState<string | null>(null);
 
@@ -69,6 +70,7 @@ export const CreateBatch: React.FC<CreateBatchProps> = ({
       date,
       onionVariety,
       approxQuantity: approxQuantity.trim() || '50 Quintals',
+      farmerPhone: farmerPhone.trim(),
       notes,
     });
   };
@@ -204,6 +206,22 @@ export const CreateBatch: React.FC<CreateBatchProps> = ({
                   className="w-full px-4 py-2.5 rounded-xl border border-[#cfcbb8] bg-[#f8faf8] text-sm text-[#1c2a20] focus:outline-none focus:border-[#1c5a35] focus:bg-white transition"
                 />
                 <Scale className="w-4 h-4 text-[#55665b] absolute right-3 top-3 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Farmer WhatsApp Number */}
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold text-[#1c2a20] uppercase tracking-wider mb-1.5">
+                Farmer WhatsApp Number <span className="text-[#55665b] text-[10px] font-normal">(For automated transparent report)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="tel"
+                  value={farmerPhone}
+                  onChange={(e) => setFarmerPhone(e.target.value)}
+                  placeholder="e.g. +91 98765 43210 (Indian WhatsApp number)"
+                  className="w-full px-4 py-2.5 rounded-xl border border-[#cfcbb8] bg-[#f8faf8] text-sm font-mono text-[#1c2a20] focus:outline-none focus:border-[#1c5a35] focus:bg-white transition"
+                />
               </div>
             </div>
           </div>

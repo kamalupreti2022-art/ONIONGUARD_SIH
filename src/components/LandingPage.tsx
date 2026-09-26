@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Language, ViewMode } from '../types';
 import { translations } from '../utils/translations';
+import { LivePriceIndicator } from './LivePriceIndicator';
 
 interface LandingPageProps {
   onNavigate: (view: ViewMode) => void;
@@ -84,6 +85,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <span>{t.startAssessment}</span>
               <ArrowRight className="w-4 h-4 stroke-[2.5]" />
             </button>
+          </div>
+
+          {/* Live Official Mandi / Market Price inside main dark-green hero */}
+          <div className="pt-4 max-w-xl">
+            <LivePriceIndicator />
           </div>
         </div>
       </section>
